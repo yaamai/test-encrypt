@@ -21,35 +21,70 @@ function download(data, filename, type) {
     }, 0); 
 }
 
-async function handleFiles() {
-  const fileList = this.files; /* now you can work with the file list */
-  const htmlText = await this.files[0].text()
-
-
+async function bundleFiles(baseFile, fileMap) {
+  const htmlText = await baseFile.text()
   const parser = new DOMParser()
   htmlDoc = parser.parseFromString(htmlText, "text/html")
-  const scriptTags = htmlDoc.getElementsByTagName("script")
-  console.log(scriptTags)
 
+  // bundle scripts
+  const scriptTags = htmlDoc.getElementsByTagName("script")
   for (let script of htmlDoc.scripts) {
       if (script.src !== "") {
-          let resp = await fetch(script.src)
+          let elems = script.src.split("/")
+          let filename = elems[elems.length-1]
+
           let node = htmlDoc.createElement("script")
-          // NOTE: innerText may cause entity encoding
-          node.innerHTML = await resp.text()
+          if (fileMap[filename] != undefined) {
+            node.innerHTML = await fileMap[filename].text()
+          } else {
+            let resp = await fetch(script.src)
+            // NOTE: innerText may cause entity encoding
+            node.innerHTML = await resp.text()
+          }
           script.replaceWith(node)
       }
   }
+
+  // bundle styles
   for (let style of htmlDoc.getElementsByTagName("link")) {
-      let resp = await fetch(style.href)
+      let elems = style.href.split("/")
+      let filename = elems[elems.length-1]
+
       let node = htmlDoc.createElement("style")
-      node.innerHTML = await resp.text()
+      if (fileMap[filename] != undefined) {
+        node.innerHTML = await fileMap[filename].text()
+      } else {
+        let resp = await fetch(style.href)
+        // NOTE: innerText may cause entity encoding
+        node.innerHTML = await resp.text()
+      }
       style.replaceWith(node)
   }
 
   // NOTE: serialize with XMLSerializer cause some chars('>') to entity encoding
   let serializer = new XMLSerializer()
   let htmlOutText = serializer.serializeToString(htmlDoc.doctype) + htmlDoc.firstElementChild.outerHTML
+  return htmlOutText
+}
+
+async function handleFiles() {
+  let fileMap = {}
+  for (let idx = 0; idx < this.files.length; idx++) {
+    fileMap[this.files[idx].name] = this.files[idx]
+  }
+
+  // serach html file
+  let htmlFile = undefined
+  for (let name of Object.keys(fileMap)) {
+    if (name == "index.html") {
+      htmlFile = fileMap[name]
+      delete fileMap[name]
+    } else if (name.endsWith("html") || name.endsWith("htm")) {
+      htmlFile = fileMap[name]
+      delete fileMap[name]
+    }
+  }
+  let htmlOutText = await bundleFiles(htmlFile, fileMap)
 
   // prepare PBKDF2 and AES salt,iv
   let salt = window.crypto.getRandomValues(new Uint8Array(16))
@@ -57,7 +92,6 @@ async function handleFiles() {
   let password = prompt("password")
   let bytes = await encryptText(password, salt, iv, htmlOutText)
   let output = await wrapDecrypter(bytes, salt, iv)
-  // document.getElementById("out").innerHTML = await wrapDecrypter(await encryptText("password", salt, iv, htmlOutText), salt, iv)
   download(output, 'encrypted.html', 'text/html')
 }
 
@@ -108,16 +142,8 @@ async function wrapDecrypter(dataBytes, salt, iv) {
         let text = await decrypt(password, data, salt, iv)
         await rewrite(text)
     }
-// <body onload="rewrite();">
 ` + '<' + '/script>' + '<' + 'body onload="main()"><' + '/body' + '<' + '/html>'
 
 }
-
-
-/*
-baseKey = await window.crypto.subtle.importKey("raw", new Uint8Array(1,2,3,4,5), {name: "PBKDF2"}, false, ["deriveKey"])
-key = await window.crypto.subtle.deriveKey({name: "PBKDF2", salt: window.crypto.getRandomValues(new Uint8Array(16)), iterations: 313131, hash: {name: "SHA-256"}}, baseKey, {name: "AES-GCM", length: 128}, false, ["encrypt", "decrypt"])
-await window.crypto.subtle.encrypt({name: "AES-GCM", iv: window.crypto.getRandomValues(new Uint8Array(12)), tagLength: 128}, key, new Uint8Array([1,2,3,4]))
-*/
 </script>
 </html>
