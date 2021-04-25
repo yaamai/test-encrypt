@@ -120,9 +120,10 @@ async function wrapDecrypter(dataBytes, salt, iv) {
     const iv = new Uint8Array([${iv.join(",")}])
 
     async function rewrite(text) {
-        document.open()
-        document.write(text)
-        document.close()
+        let parser = new DOMParser()
+        let htmlDoc = parser.parseFromString(text, "text/html")
+        window.document.doctype.replaceWith(htmlDoc.doctype)
+        window.document.documentElement.replaceWith(htmlDoc.documentElement)
     }
 
     async function decrypt(passwordText, data, salt, iv) {
