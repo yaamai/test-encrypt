@@ -115,15 +115,17 @@ async function wrapDecrypter(dataBytes, salt, iv) {
     return `<!DOCTYPE html>
 <html>
 <script>
-    const data = new Uint8Array([${(new Uint8Array(dataBytes)).join(",")}])
-    const salt = new Uint8Array([${salt.join(",")}])
-    const iv = new Uint8Array([${iv.join(",")}])
+    // conflicts variables in decrypted script
+    const _data = new Uint8Array([${(new Uint8Array(dataBytes)).join(",")}])
+    const _salt = new Uint8Array([${salt.join(",")}])
+    const _iv = new Uint8Array([${iv.join(",")}])
 
     async function rewrite(text) {
-        let parser = new DOMParser()
-        let htmlDoc = parser.parseFromString(text, "text/html")
-        window.document.doctype.replaceWith(htmlDoc.doctype)
-        window.document.documentElement.innerHTML = htmlDoc.documentElement.innerHTML
+        // NOTE: these sequence warned by chrome,
+        //       but another methods(replaceWith/innerHTML) can't call javascripts in text
+        document.open()
+        document.write(text)
+        document.close()
     }
 
     async function decrypt(passwordText, data, salt, iv) {
@@ -140,7 +142,7 @@ async function wrapDecrypter(dataBytes, salt, iv) {
         if (password === null) {
             password = prompt("password")
         }
-        let text = await decrypt(password, data, salt, iv)
+        let text = await decrypt(password, _data, _salt, _iv)
         await rewrite(text)
     }
 ` + '<' + '/script>' + '<' + 'body onload="main()"><' + '/body' + '<' + '/html>'
