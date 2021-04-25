@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+  <input type="file" id="input" multiple>
+  <div id="out"></div>
+
+<script>
+const inputElement = document.getElementById("input");
+inputElement.addEventListener("change", handleFiles, false);
+
+function download(data, filename, type) {
+    var file = new Blob([data], {type: type});
+    var a = document.createElement("a"),
+            url = URL.createObjectURL(file);
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() {
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);  
+    }, 0); 
+}
+
+async function handleFiles() {
+  const fileList = this.files; /* now you can work with the file list */
+  const htmlText = await this.files[0].text()
+
+
+  const parser = new DOMParser()
+  htmlDoc = parser.parseFromString(htmlText, "text/html")
+  const scriptTags = htmlDoc.getElementsByTagName("script")
+  console.log(scriptTags)
+
+  for (let script of htmlDoc.scripts) {
+      if (script.src !== "") {
+          let resp = await fetch(script.src)
+          let node = htmlDoc.createElement("script")
+          // NOTE: innerText may cause entity encoding
+          node.innerHTML = await resp.text()
+          script.replaceWith(node)
+      }
+  }
+  for (let style of htmlDoc.getElementsByTagName("link")) {
+      let resp = await fetch(style.href)
+      let node = htmlDoc.createElement("style")
+      node.innerHTML = await resp.text()
+      style.replaceWith(node)
+  }
+
+  // NOTE: serialize with XMLSerializer cause some chars('>') to entity encoding
+  let serializer = new XMLSerializer()
+  let htmlOutText = serializer.serializeToString(htmlDoc.doctype) + htmlDoc.firstElementChild.outerHTML
+
+  // prepare PBKDF2 and AES salt,iv
+  let salt = window.crypto.getRandomValues(new Uint8Array(16))
+  let iv = window.crypto.getRandomValues(new Uint8Array(12))
+  let bytes = await encryptText("password", salt, iv, htmlOutText)
+  let output = await wrapDecrypter(bytes, salt, iv)
+  // document.getElementById("out").innerHTML = await wrapDecrypter(await encryptText("password", salt, iv, htmlOutText), salt, iv)
+  download(output, 'encrypted.html', 'text/html')
+}
+
+const toHexString = bytes => bytes.reduce((str, byte) => str + byte.toString(16).padStart(2, '0'), '')
+const fromHexString = hexString => new Uint8Array(hexString.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+
+async function encryptText(passwordText, salt, iv, inputText) {
+  // encode to bytes
+  let passwordBytes = (new TextEncoder).encode(passwordText)
+  let inputBytes = (new TextEncoder).encode(inputText)
+
+  // generate key and encrypt
+  let baseKey = await window.crypto.subtle.importKey("raw", passwordBytes, {name: "PBKDF2"}, false, ["deriveKey"])
+  let key = await window.crypto.subtle.deriveKey({name: "PBKDF2", salt: salt, iterations: 313131, hash: {name: "SHA-256"}}, baseKey, {name: "AES-GCM", length: 128}, false, ["encrypt", "decrypt"])
+  let resultBytes = await window.crypto.subtle.encrypt({name: "AES-GCM", iv: iv, tagLength: 128}, key, inputBytes)
+
+  return resultBytes
+}
+
+async function wrapDecrypter(dataBytes, salt, iv) {
+    return `<!DOCTYPE html>
+<html>
+<script>
+    const data = new Uint8Array([${(new Uint8Array(dataBytes)).join(",")}])
+    const salt = new Uint8Array([${salt.join(",")}])
+    const iv = new Uint8Array([${iv.join(",")}])
+
+    async function rewrite(text) {
+        document.open()
+        document.write(text)
+        document.close()
+    }
+
+    async function decrypt(passwordText, data, salt, iv) {
+        let passwordBytes = (new TextEncoder).encode(passwordText)
+        let baseKey = await window.crypto.subtle.importKey("raw", passwordBytes, {name: "PBKDF2"}, false, ["deriveKey"])
+        let key = await window.crypto.subtle.deriveKey({name: "PBKDF2", salt: salt, iterations: 313131, hash: {name: "SHA-256"}}, baseKey, {name: "AES-GCM", length: 128}, false, ["encrypt", "decrypt"])
+        let resultBytes = await window.crypto.subtle.decrypt({name: "AES-GCM", iv: iv, tagLength: 128}, key, data)
+        return (new TextDecoder).decode(resultBytes)
+    }
+
+    async function main() {
+        let text = await decrypt("password", data, salt, iv)
+        await rewrite(text)
+    }
+// <body onload="rewrite();">
+` + '<' + '/script>' + '<' + 'body onload="main()"><' + '/body' + '<' + '/html>'
+
+}
+
+
+/*
+baseKey = await window.crypto.subtle.importKey("raw", new Uint8Array(1,2,3,4,5), {name: "PBKDF2"}, false, ["deriveKey"])
+key = await window.crypto.subtle.deriveKey({name: "PBKDF2", salt: window.crypto.getRandomValues(new Uint8Array(16)), iterations: 313131, hash: {name: "SHA-256"}}, baseKey, {name: "AES-GCM", length: 128}, false, ["encrypt", "decrypt"])
+await window.crypto.subtle.encrypt({name: "AES-GCM", iv: window.crypto.getRandomValues(new Uint8Array(12)), tagLength: 128}, key, new Uint8Array([1,2,3,4]))
+*/
+</script>
+</html>
