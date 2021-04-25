@@ -54,7 +54,8 @@ async function handleFiles() {
   // prepare PBKDF2 and AES salt,iv
   let salt = window.crypto.getRandomValues(new Uint8Array(16))
   let iv = window.crypto.getRandomValues(new Uint8Array(12))
-  let bytes = await encryptText("password", salt, iv, htmlOutText)
+  let password = prompt("password")
+  let bytes = await encryptText(password, salt, iv, htmlOutText)
   let output = await wrapDecrypter(bytes, salt, iv)
   // document.getElementById("out").innerHTML = await wrapDecrypter(await encryptText("password", salt, iv, htmlOutText), salt, iv)
   download(output, 'encrypted.html', 'text/html')
@@ -99,7 +100,12 @@ async function wrapDecrypter(dataBytes, salt, iv) {
     }
 
     async function main() {
-        let text = await decrypt("password", data, salt, iv)
+        let params = new URLSearchParams(document.location.hash.substr(1))
+        let password = params.get("password")
+        if (password === null) {
+            password = prompt("password")
+        }
+        let text = await decrypt(password, data, salt, iv)
         await rewrite(text)
     }
 // <body onload="rewrite();">
